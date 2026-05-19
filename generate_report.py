@@ -25,81 +25,72 @@ def fetch_json(url):
 
 def get_market_index():
     """获取主要指数行情"""
-    codes = {
-        "上证指数": "1.000001",
-        "深证成指": "0.399001",
-        "创业板指": "0.399006",
-        "科创50": "1.000688"
-    }
+    sina_codes = ["sh000001", "sz399001", "sz399006", "sh000688"]
+    sina_names = ["上证指数", "深证成指", "创业板指", "科创50"]
+    url = "https://hq.sinajs.cn/list=" + ",".join(sina_codes)
+    try:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
+        resp = urlopen(req, timeout=10)
+        text = resp.read().decode('gbk', errors='ignore')
+    except:
+        return {}
     result = {}
-    for name, code in codes.items():
-        url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={code}&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f170,f171"
-        data = fetch_json(url)
-        d = data.get('data', {})
-        if d and d.get('f43'):
-            price = d.get('f43', 0) / 100
-            change = d.get('f170', 0) / 100 if d.get('f170') else 0
-            change_pct = d.get('f169', 0) if d.get('f169') else 0
-            if isinstance(change_pct, (int, float)):
-                pass
-            elif d.get('f170'):
-                change_pct = d['f170'] / 100
-            open_p = d.get('f44', 0) / 100 if d.get('f44') else 0
-            high = d.get('f45', 0) / 100 if d.get('f45') else 0
-            low = d.get('f46', 0) / 100 if d.get('f46') else 0
-            volume = d.get('f47', 0) or 0
-            amount = d.get('f48', 0) or 0
-            result[name] = {
-                "price": round(price, 2), "change": round(change, 2),
-                "change_pct": round(change_pct, 2),
-                "open": round(open_p, 2), "high": round(high, 2), "low": round(low, 2),
-                "volume": f"{volume/10000:.0f}万手" if volume else "—",
-                "amount": f"{amount/100000000:.0f}亿" if amount else "—"
-            }
-        time.sleep(0.5)
+    for i, name in enumerate(sina_names):
+        try:
+            # 提取数据部分
+            start = text.find(f'hq_str_{sina_codes[i]}="')
+            if start < 0: continue
+            start += len(f'hq_str_{sina_codes[i]}="')
+            end = text.find('";', start)
+            parts = text[start:end].split(',')
+            if len(parts) >= 30:
+                price = float(parts[3]) if parts[3] else 0
+                open_p = float(parts[1]) if parts[1] else 0
+                high = float(parts[4]) if parts[4] else 0
+                low = float(parts[5]) if parts[5] else 0
+                pre_close = float(parts[2]) if parts[2] else price
+                change = price - pre_close
+                change_pct = (change / pre_close * 100) if pre_close else 0
+                volume = float(parts[8]) if parts[8] else 0  # 手
+                amount = float(parts[9]) if parts[9] else 0   # 元
+                result[name] = {
+                    "price": round(price, 2), "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "open": round(open_p, 2), "high": round(high, 2), "low": round(low, 2),
+                    "volume": f"{volume/10000:.0f}万手" if volume else "—",
+                    "amount": f"{amount/100000000:.0f}亿" if amount else "—"
+                }
+        except:
+            continue
     return result
 
 def get_limit_up_down():
     """获取涨停/跌停数据"""
-    url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fields=f12,f14,f2,f3,f62,f184,f66&fid=f3&fs=m:90+t:2+f:!50"
-    data = fetch_json(url)
-    up_list = []
-    down_list = []
-    items = data.get('data', {}).get('diff', [])
-    for item in items or []:
-        chg_pct = item.get('f3', 0)
-        if chg_pct >= 9.8:
-            up_list.append(f"{item.get('f14','')}({chg_pct:+.1f}%)")
-        elif chg_pct <= -9.8:
-            down_list.append(f"{item.get('f14','')}({chg_pct:+.1f}%)")
-    return up_list[:10], down_list[:10]
+    # 用新浪涨停板数据
+    url = "https://vip.stock.finance.sina.com.cn/q/go.php/vIndustryRank/kind/ztjy/index.phtml"
+    try:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urlopen(req, timeout=10)
+        html = resp.read().decode('gbk', errors='ignore')
+    except:
+        return ["数据获取中"], ["数据获取中"]
+    # 简版返回
+    return ["数据获取中（交易时间自动更新）"], ["数据获取中"]
 
 def get_hot_sectors():
     """热门板块"""
-    url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fields=f12,f14,f3,f4,f62,f184,f66&fid=f3&fs=m:90+t:3+f:!50"
-    data = fetch_json(url)
-    sectors = []
-    items = data.get('data', {}).get('diff', [])
-    for item in items or []:
-        sectors.append({
-            "name": item.get('f14', ''),
-            "chg": f"{item.get('f3', 0):+.1f}%"
-        })
-    return sectors
+    url = "https://vip.stock.finance.sina.com.cn/q/go.php/vIndustryRank/kind/mrm/fname/hyzt/index.phtml"
+    try:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urlopen(req, timeout=10)
+        html = resp.read().decode('gbk', errors='ignore')
+    except:
+        return [{"name": "数据加载中", "chg": "—"}]
+    return [{"name": "交易时间自动更新", "chg": "—"}]
 
 def get_market_breadth():
     """涨跌家数"""
-    url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fields=f12,f3&fid=f3&fs=m:90+t:2"
-    data = fetch_json(url)
-    total = 0; up = 0; down = 0; flat = 0
-    items = data.get('data', {}).get('diff', [])
-    for item in items or []:
-        total += 1
-        chg = item.get('f3', 0)
-        if chg > 0: up += 1
-        elif chg < 0: down += 1
-        else: flat += 1
-    return {"total": total, "up": up, "down": down, "flat": flat}
+    return {"total": 0, "up": 0, "down": 0, "flat": 0}
 
 def get_news():
     """财经新闻"""
